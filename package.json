@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
-    "test": "npm run build && node --test \"test/*.test.mjs\""
+    "test": "npm run build && node --test --test-timeout=60000 --test-force-exit \"test/*.test.mjs\""
   },
   "license": "MIT",
   "dependencies": {

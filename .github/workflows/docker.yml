@@ -16,6 +16,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,6 +25,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+        env:
+          NODE_OPTIONS: --trace-warnings
       - name: Unraid template (unraid/my-music-bot.xml) matches .env.example
         run: node scripts/gen-unraid-template.mjs --check
 
@@ -31,6 +34,7 @@ jobs:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
