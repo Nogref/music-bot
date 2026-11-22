@@ -5,9 +5,19 @@ updates:
     schedule: { interval: weekly }
     groups:
       discord: { patterns: ["discord.js", "@discordjs/*"] }
+    ignore:
+      # Must stay on the version prism-media (inside @discordjs/voice) loads.
+      - dependency-name: opusscript
+      # Types follow the Node version the image runs.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
   - package-ecosystem: docker
     directory: /
     schedule: { interval: monthly }
+    ignore:
+      # Stay on the Node LTS line; move up deliberately.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
