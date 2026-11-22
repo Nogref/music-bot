@@ -1,0 +1,89 @@
+# Tests every push/PR; on main (and v* tags) builds the image, smoke-tests it,
+# and publishes it to ghcr.io/<owner>/music-bot for Unraid to pull.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Unraid template (unraid/my-music-bot.xml) matches .env.example
+        run: node scripts/gen-unraid-template.mjs --check
+
+  image:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name (GHCR needs lowercase)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: Build (load locally for the smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: music-bot:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: |
+          # Native modules and the voice stack load (Opus + DAVE), privilege drop works, and it refuses to start without config.
+          docker run --rm --entrypoint node music-bot:ci -e "require('better-sqlite3'); import('@discordjs/voice').then(v => { const r = v.generateDependencyReport(); console.log(r); if (!/davey: \d/.test(r) || !/opusscript: \d/.test(r)) process.exit(1); })"
+          docker run --rm music-bot:ci sh -c 'id -u; id -g' | tee ids.txt
+          grep -qx 99 ids.txt
+          out=$(docker run --rm music-bot:ci 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "Missing required environment variable"
+
+      - name: Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
