@@ -4,8 +4,8 @@ const order: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 
 // Read lazily so LOG_LEVEL from bot.env (loaded after import) still applies.
 const threshold = () => order[(process.env.LOG_LEVEL?.trim().toLowerCase() as Level) || "info"] ?? order.info;
 
-// Includes Subsonic's t (token), s (salt) and p (password) parameters.
-const SECRET_PARAMS = /([?&](?:apikey|api_key|X-Plex-Token|token|secret|t|s|p)=)[^&\s]+/gi;
+// Includes Subsonic's t (token), s (salt) and p (password), and the Apex stats API's auth key.
+const SECRET_PARAMS = /([?&](?:apikey|api_key|auth|X-Plex-Token|token|secret|t|s|p)=)[^&\s]+/gi;
 
 export function redact(text: string): string {
   return text.replace(SECRET_PARAMS, "$1***");

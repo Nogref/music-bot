@@ -8,6 +8,7 @@ A self-hosted Discord music bot that plays **your own music library** in voice c
 - Loop (song or queue), previous, seek, volume per server, shuffle, queue management
 - A now-playing card with buttons in the voice channel's chat, or a fixed board with `/setup nowplaying`
 - One player per server, all playing from the same library at the same time
+- Optional **Apex Legends stats**: link your account, `/apex me`, today's maps, the Predator cutoff, a squad leaderboard with RP gained this week, and rank-up shout-outs
 
 Audio is streamed from the library as Opus and goes straight to Discord, so at 100% volume the bot does no audio work at all. Any other volume decodes and re-encodes in the bot (pure JavaScript, no ffmpeg). Plays through the bot aren't counted as plays in Aurral.
 
@@ -26,6 +27,8 @@ Audio is streamed from the library as Opus and goes straight to Discord, so at 1
 | `/nowplaying` | Move the now-playing card to this channel |
 | `/help` | All of the above, in plain words |
 | `/setup nowplaying [channel]` | 🔒 Server admins: keep a now-playing board in a channel; empty removes it |
+| `/apex link · me · stats · map · predator · servers · leaderboard` | Apex Legends stats (when `APEX_API_KEY` is set; see below) |
+| `/setup apex-leaderboard [channel]` · `/setup apex-shoutouts [channel]` | 🔒 Server admins: the squad leaderboard board, and where rank-up shout-outs go |
 | `/servers list · approve · remove` | 👑 You, in a DM with the bot: manage which servers can use it |
 
 **Who can control the music:** anyone in the bot's voice channel, and server admins (Manage Server) from anywhere. Anyone can start the music in an empty channel; if it's already playing somewhere else in that server, they have to join there.
@@ -70,6 +73,23 @@ Open the invite link from the log. It asks for: View Channels, Send Messages, Em
 
 If your DMs are closed to the bot, the request waits; open them (Server → Privacy Settings → Direct Messages) and it asks again on the next restart, or use `/servers approve`.
 
+## Apex Legends stats
+
+Turn it on with a free key from [apexlegendsapi.com](https://apexlegendsapi.com) (Apex Legends Status) in `APEX_API_KEY`. Without one, the `/apex` commands don't appear.
+
+- **`/apex link player platform`**: each person links their in-game name once (on PC, the EA account name, even if they play through Steam). The bot checks the name exists before saving it.
+- **`/apex me`**, **`/apex stats member:@friend`** (or `player:` for anyone): rank and RP (and how far from the Predator cutoff, for Masters), level, online status, and the trackers on their current legend's banner.
+- **`/apex map`**: the Pubs and Ranked maps right now, when they change, and what's next, with the map pictures.
+- **`/apex predator`**: the RP it takes to be Apex Predator on each platform. **`/apex servers`**: whether EA login and matchmaking are up.
+- **Squad leaderboard**: `/setup apex-leaderboard channel:#apex` posts a board that updates itself, with everyone who's linked and in this server, best rank first, and **RP gained since Monday 12 AM** (`TIMEZONE`, Central by default). `/apex leaderboard` shows it to anyone, anywhere.
+- **Rank-up shout-outs**: when someone reaches a new high for the season (e.g. Platinum III → Platinum II), the bot celebrates in the leaderboard's channel. Dropping and re-climbing doesn't count twice, and the reset at a new ranked season is ignored. `/setup apex-shoutouts channel:#…` moves them; without a channel it turns them off.
+
+The bot checks each linked player every `APEX_POLL_MINUTES` (15). Things to know about the data:
+
+- There's no official Apex stats API. Kills, damage and wins only exist for **trackers equipped on legends' banners**; rank, RP and level are always there.
+- RP this week starts counting from the first check, so it's partial for the week someone links.
+- Match history isn't available on free keys, so the bot can't list games or per-match stats.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -81,6 +101,8 @@ If your DMs are closed to the bot, the request waits; open them (Server → Priv
 | Commands don't show up in a friend's server | You haven't approved it yet (`/servers list`), or it was added without the `applications.commands` scope: re-invite with the link from the log |
 | No `/servers` in your DMs | Discord can take a few minutes to show new DM commands; restart the Discord app |
 | Similar-song radio says it's playing random songs | The library found nothing similar for that pick |
+| `/apex link` can't find someone | Use the exact in-game name and the right platform (PC players: the EA account name) |
+| Apex commands say the stats service had a problem | Check `APEX_API_KEY`; apexlegendsstatus.com may also be busy, try again in a minute |
 
 ## Development
 

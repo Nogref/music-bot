@@ -20,7 +20,7 @@ const raw = `https://raw.githubusercontent.com/${OWNER}/${REPO}/main`;
 const REQUIRED = new Set(["DISCORD_TOKEN", "SUBSONIC_URL", "SUBSONIC_USER", "SUBSONIC_PASSWORD"]);
 const SKIP = new Set(["DATA_DIR"]); // fixed to the /data path mapping below
 // Shown by default; everything else sits behind Unraid's "Show more settings".
-const ALWAYS = /^(DISCORD_TOKEN|OWNER_ID|ALLOWED_GUILD_IDS|SUBSONIC_URL|SUBSONIC_USER|SUBSONIC_PASSWORD|MUSIC_BITRATE)$/;
+const ALWAYS = /^(DISCORD_TOKEN|OWNER_ID|ALLOWED_GUILD_IDS|SUBSONIC_URL|SUBSONIC_USER|SUBSONIC_PASSWORD|MUSIC_BITRATE|APEX_API_KEY)$/;
 const MASK = /(TOKEN|KEY|SECRET|PASSWORD)$/;
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -63,7 +63,7 @@ const xml = `<?xml version="1.0"?>
   <Privileged>false</Privileged>
   <Support>https://github.com/${OWNER}/${REPO}/issues</Support>
   <Project>https://github.com/${OWNER}/${REPO}</Project>
-  <Overview>Discord music bot that plays your own music library (Aurral's built-in Subsonic server, or Navidrome) in voice channels, in your server and your friends' servers. You approve each server from a Discord DM. Search-as-you-type /play, radio (random or songs like one you pick), lyrics, loop, seek, volume, queue controls and a live now-playing card. To reach Aurral by name (http://aurral:3001), put this container on the same custom Docker network; on plain bridge, use http://YOUR-UNRAID-IP:PORT.</Overview>
+  <Overview>Discord music bot that plays your own music library (Aurral's built-in Subsonic server, or Navidrome) in voice channels, in your server and your friends' servers. You approve each server from a Discord DM. Search-as-you-type /play, radio (random or songs like one you pick), lyrics, loop, seek, volume, queue controls and a live now-playing card. Optional Apex Legends stats: /apex link, stats, maps, Predator cutoff, a squad leaderboard and rank-up shout-outs. To reach Aurral by name (http://aurral:3001), put this container on the same custom Docker network; on plain bridge, use http://YOUR-UNRAID-IP:PORT.</Overview>
   <Category>MediaServer:Music Tools:</Category>
   <WebUI/>
   <TemplateURL>${raw}/unraid/my-music-bot.xml</TemplateURL>

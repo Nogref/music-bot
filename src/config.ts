@@ -16,6 +16,8 @@ export interface Config {
   /** Aurral's built-in Subsonic server, or any other Subsonic server (Navidrome, gonic…). */
   subsonic: { url: string; user: string; password: string; bitrate: number };
   idleMinutes: number;
+  /** Apex Legends stats (apexlegendsapi.com). Off without a key. */
+  apex?: { apiKey: string; url: string; pollMinutes: number; timezone: string };
   dataDir: string;
   http: { port: number; timeoutMs: number };
 }
@@ -105,12 +107,29 @@ export function loadConfig(): Config {
   }
   const ownerId = env("OWNER_ID");
   if (ownerId && !/^\d{15,22}$/.test(ownerId)) log.warn(`config: OWNER_ID="${ownerId}" doesn't look like a Discord user ID; using the app's owner instead.`);
+  const apexKey = env("APEX_API_KEY");
+  const timezone = env("TIMEZONE") ?? "America/Chicago";
+  let tzOk = true;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+  } catch {
+    tzOk = false;
+    log.warn(`config: TIMEZONE="${timezone}" isn't a time zone (try America/Chicago); using America/Chicago`);
+  }
   return {
     discordToken: discordToken!,
     ownerId: ownerId && /^\d{15,22}$/.test(ownerId) ? ownerId : undefined,
     preApproved: list("ALLOWED_GUILD_IDS").filter((id) => /^\d{15,22}$/.test(id)),
     subsonic: { url: subsonicUrl!, user: user!, password: password!, bitrate: num("MUSIC_BITRATE", 128, 32, 512) },
     idleMinutes: num("IDLE_MINUTES", 5, 1, 720),
+    apex: apexKey
+      ? {
+          apiKey: apexKey,
+          url: (env("APEX_API_URL") ?? "https://api.mozambiquehe.re").replace(/\/+$/, ""),
+          pollMinutes: num("APEX_POLL_MINUTES", 15, 5, 1440),
+          timezone: tzOk ? timezone : "America/Chicago",
+        }
+      : undefined,
     dataDir: env("DATA_DIR") ?? "/data",
     http: { port: num("HEALTH_PORT", 8080, 1, 65535), timeoutMs: num("HTTP_TIMEOUT_MS", 10_000, 1000) },
   };

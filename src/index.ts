@@ -23,7 +23,8 @@ async function main() {
   // No privileged intents: servers (for approvals) and voice states (who's listening).
   const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
   const app = buildApp({ cfg, store, client, subsonic, link: () => new DiscordVoiceLink(subsonic) });
-  const features = [app.player, app.help, app.servers];
+  const features = app.features;
+  if (cfg.apex) log.info(`apex: stats are on (checking linked players every ${cfg.apex.pollMinutes} min; weeks start Monday in ${cfg.apex.timezone})`);
 
   client.once(Events.ClientReady, async (c) => {
     log.info(`discord: logged in as ${c.user.tag}`);

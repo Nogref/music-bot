@@ -3,11 +3,11 @@ import { EmbedBuilder, InteractionContextType, MessageFlags, SlashCommandBuilder
 import { Colors } from "../core/discord.js";
 import type { Feature } from "../core/router.js";
 
-export function helpFeature(): Feature {
-  const embed = () =>
-    new EmbedBuilder()
+export function helpFeature(opts: { apex?: boolean } = {}): Feature {
+  const embed = () => {
+    const e = new EmbedBuilder()
       .setColor(Colors.music)
-      .setTitle("🎶 Music bot")
+      .setTitle(opts.apex ? "🎶 Music bot (and Apex stats)" : "🎶 Music bot")
       .setDescription("I play music from our library in voice channels. Join a voice channel first, then:")
       .addFields(
         {
@@ -30,12 +30,23 @@ export function helpFeature(): Feature {
           name: "📜 The queue",
           value: "`/queue` shows what's next · `/shuffle` · `/remove` a song by its number · `/clear` everything after this song",
         },
-        {
-          name: "🔧 Server admins",
-          value: "`/setup nowplaying` keeps a now-playing board in a channel. Admins can also control the music from anywhere.",
-        },
-      )
-      .setFooter({ text: "I leave the voice channel when the music's been stopped or everyone's left for a few minutes." });
+      );
+    if (opts.apex) {
+      e.addFields({
+        name: "🎯 Apex Legends",
+        value: [
+          "`/apex link`: link your account once (puts you on the squad leaderboard).",
+          "`/apex me` · `/apex stats @friend`: rank, RP, level and banner trackers.",
+          "`/apex map`: Pubs and Ranked maps now and next · `/apex predator` · `/apex servers` · `/apex leaderboard`",
+        ].join("\n"),
+      });
+    }
+    e.addFields({
+      name: "🔧 Server admins",
+      value: `\`/setup nowplaying\` keeps a now-playing board in a channel.${opts.apex ? " `/setup apex-leaderboard` keeps the squad leaderboard in one (rank-up shout-outs go there too; `/setup apex-shoutouts` moves or stops them)." : ""} Admins can also control the music from anywhere.`,
+    });
+    return e.setFooter({ text: "I leave the voice channel when the music's been stopped or everyone's left for a few minutes." });
+  };
   return {
     name: "help",
     guildCommands: [

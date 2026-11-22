@@ -129,7 +129,15 @@ export function fakeClient({ ownerId = "owner1" } = {}) {
       commandSets,
       left: false,
       channels: { cache: new Collection() },
-      members: { me: null },
+      /** Who's in the server (for member lookups). */
+      memberIds: new Set(["u1", "u2", "u3", "owner1"]),
+      members: {
+        me: null,
+        async fetch(userId) {
+          if (!guild.memberIds.has(userId)) throw Object.assign(new Error("Unknown Member"), { code: 10007 });
+          return { id: userId, displayName: `${userId}-nick`, user: { id: userId, username: userId } };
+        },
+      },
       commands: { set: async (j) => void commandSets.push(j) },
       iconURL: () => null,
       async fetchOwner() {
@@ -175,6 +183,7 @@ export function fakeInteraction(client, { guild, command, sub, options = {}, cus
     deferred: false,
     replied: false,
     options: {
+      getUser: (n) => options[n] ?? null,
       getString: (n, req) => opt(n, req),
       getBoolean: (n) => options[n] ?? null,
       getInteger: (n, req) => opt(n, req),

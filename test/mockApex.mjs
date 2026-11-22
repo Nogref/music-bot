@@ -1,0 +1,106 @@
+// A fake Apex Legends Status API (api.mozambiquehe.re), shaped like the real responses.
+import http from "node:http";
+
+export function player({ name, uid, platform = "PC", score = 5000, rank = "Gold", div = 2, level = 250, season = "season27_split_1", online = 0, legend = "Wraith", trackers = [{ name: "BR Kills", value: 1234 }] }) {
+  return {
+    global: {
+      name,
+      uid,
+      platform,
+      level,
+      levelPrestige: 1,
+      toNextLevelPercent: 40,
+      bans: { isActive: false, remainingSeconds: 0, last_banReason: "NONE" },
+      rank: { rankScore: score, rankName: rank, rankDiv: div, ladderPosPlatform: -1, rankImg: `https://api.mozambiquehe.re/assets/ranks/${rank.toLowerCase()}${div}.png`, rankedSeason: season },
+    },
+    realtime: { lobbyState: "open", isOnline: online, isInGame: 0, canJoin: 1, partyFull: 0, selectedLegend: legend, currentState: online ? "inLobby" : "offline", currentStateAsText: online ? "In lobby (02:14)" : "Offline" },
+    legends: { selected: { LegendName: legend, data: trackers.map((t) => ({ ...t, key: t.name.toLowerCase().replace(/\s/g, "_") })), ImgAssets: { icon: `https://example.test/${legend}.png` } } },
+    total: { kills: { name: "BR Kills", value: trackers.find((t) => /kills/i.test(t.name))?.value ?? -1 }, kd: { value: "-1", name: "KD" } },
+  };
+}
+
+export async function startApexMock() {
+  const calls = [];
+  const state = {
+    players: new Map(), // "name|platform" and "uid|platform" → player json
+    slowDownOnce: false,
+    maps: () => {
+      const now = Math.floor(Date.now() / 1000);
+      return {
+        battle_royale: {
+          current: { start: now - 600, end: now + 1800, map: "World's Edge", code: "worlds_edge_rotation", DurationInSecs: 2400, DurationInMinutes: 40, asset: "https://apexlegendsstatus.com/assets/maps/Worlds_Edge.png", remainingSecs: 1800, remainingMins: 30, remainingTimer: "00:30:00" },
+          next: { start: now + 1800, end: now + 4200, map: "Olympus", code: "olympus_rotation", DurationInSecs: 2400, DurationInMinutes: 40, asset: "https://apexlegendsstatus.com/assets/maps/Olympus.png" },
+        },
+        ranked: {
+          current: { start: now - 3600, end: now + 82800, map: "Storm Point", code: "storm_point_rotation", DurationInSecs: 86400, DurationInMinutes: 1440, asset: "https://apexlegendsstatus.com/assets/maps/Storm_Point.png", remainingTimer: "23:00:00" },
+          next: { start: now + 82800, end: now + 169200, map: "Broken Moon", code: "broken_moon_rotation", DurationInSecs: 86400, DurationInMinutes: 1440, asset: "https://apexlegendsstatus.com/assets/maps/Broken_Moon.png" },
+        },
+        ltm: { current: { map: "Skulltown", eventName: "TDM" } },
+      };
+    },
+    predator: {
+      RP: {
+        PC: { foundRank: 750, val: 17641, uid: "1", updateTimestamp: 1795370000, totalMastersAndPreds: 2786 },
+        PS4: { foundRank: 750, val: 16553, uid: "2", updateTimestamp: 1795370000, totalMastersAndPreds: 1620 },
+        X1: { foundRank: 750, val: 16000, uid: "3", updateTimestamp: 1795370000, totalMastersAndPreds: 900 },
+        SWITCH: { foundRank: 712, val: 15750, uid: "4", updateTimestamp: 1795370000, totalMastersAndPreds: 712 },
+      },
+    },
+    servers: {
+      Origin_login: { "EU-West": { Status: "UP", HTTPCode: 200, ResponseTime: 80 }, "US-East": { Status: "UP", HTTPCode: 200, ResponseTime: 60 } },
+      EA_novafusion: { "EU-West": { Status: "UP" }, "US-Central": { Status: "SLOW", ResponseTime: 900 } },
+      EA_accounts: { "US-East": { Status: "UP" } },
+      ApexOauth_Crossplay: { "US-East": { Status: "UP" } },
+      selfCoreTest: { "Status-website": { Status: "UP" } },
+      otherPlatforms: { "Playstation-Network": { Status: "UP" }, "Xbox-Live": { Status: "UP" } },
+    },
+  };
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    const q = Object.fromEntries(url.searchParams);
+    calls.push({ path: url.pathname, query: q });
+    const send = (status, body) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    if (q.auth !== "apex-key") return send(403, { Error: "Invalid API key" });
+    if (state.slowDownOnce) {
+      state.slowDownOnce = false;
+      return send(200, { Error: "Slow down! You're over the rate limit." }); // the real API does this with 200
+    }
+    switch (url.pathname) {
+      case "/bridge": {
+        const key = q.uid ? `${q.uid}|${q.platform}` : `${String(q.player).toLowerCase()}|${q.platform}`;
+        const p = state.players.get(key);
+        return p ? send(200, p) : send(200, { Error: `Player ${q.player ?? q.uid} not found. Try again?` });
+      }
+      case "/maprotation":
+        return send(200, state.maps());
+      case "/predator":
+        return send(200, state.predator);
+      case "/servers":
+        return send(200, state.servers);
+      default:
+        return send(404, { Error: "Unknown endpoint" });
+    }
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return {
+    base: `http://127.0.0.1:${server.address().port}`,
+    calls,
+    state,
+    /** Adds (or updates) a player, findable by name and by uid. */
+    setPlayer(p) {
+      const json = player(p);
+      state.players.set(`${p.name.toLowerCase()}|${p.platform ?? "PC"}`, json);
+      state.players.set(`${p.uid}|${p.platform ?? "PC"}`, json);
+      return json;
+    },
+    reset() {
+      calls.length = 0;
+      state.players.clear();
+      state.slowDownOnce = false;
+    },
+    close: () => new Promise((r) => server.close(r)),
+  };
+}

@@ -31,6 +31,7 @@ import { Colors, isServerAdmin, truncate } from "../core/discord.js";
 import { LiveMessage, type LivePayload } from "../core/liveMessage.js";
 import { log } from "../core/logger.js";
 import type { CommandDef, Feature } from "../core/router.js";
+import type { SetupPart } from "./setup.js";
 import { TtlCache } from "../core/ttlCache.js";
 import { NEXT_LOOP, buildCard, forgetCover, idleCard } from "../player/card.js";
 import { fmtDuration, parseTime, songLabel, type LoopMode, type Track } from "../player/queue.js";
@@ -52,7 +53,7 @@ export interface PlayerDeps {
 
 type Interactive = ChatInputCommandInteraction | MessageComponentInteraction;
 
-export function playerFeature(d: PlayerDeps): Feature & { sessions: Map<string, MusicSession> } {
+export function playerFeature(d: PlayerDeps): Feature & { sessions: Map<string, MusicSession>; setup: SetupPart[] } {
   const { client, store, subsonic, cfg } = d;
   const sessions = new Map<string, MusicSession>();
   const boards = new Map<string, LiveMessage>();
@@ -499,19 +500,6 @@ export function playerFeature(d: PlayerDeps): Feature & { sessions: Map<string, 
         .addBooleanOption((o) => o.setName("show_everyone").setDescription("Post them for everyone instead of just you")),
       (i) => lyrics(i, i.options.getBoolean("show_everyone") ?? false),
     ),
-    cmd(
-      new SlashCommandBuilder()
-        .setName("setup")
-        .setDescription("Server settings for the music bot")
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-        .addSubcommand((sc) =>
-          sc
-            .setName("nowplaying")
-            .setDescription("Keep a now-playing board in a channel (leave the channel empty to remove it)")
-            .addChannelOption((o) => o.setName("channel").setDescription("Where the board lives").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)),
-        ),
-      setupBoard,
-    ),
   ];
 
   // ---- buttons --------------------------------------------------------------------------------------
@@ -550,6 +538,16 @@ export function playerFeature(d: PlayerDeps): Feature & { sessions: Map<string, 
     name: "player",
     sessions,
     guildCommands,
+    setup: [
+      {
+        name: "nowplaying",
+        build: (sc) =>
+          sc
+            .setDescription("Keep a now-playing board in a channel (leave the channel empty to remove it)")
+            .addChannelOption((o) => o.setName("channel").setDescription("Where the board lives").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)),
+        run: setupBoard,
+      },
+    ],
     components: {
       player: onButton,
       queue: async (i) => void (await i.update(queuePage(i.guildId!, Number(i.customId.split(":")[1]) || 0))),
