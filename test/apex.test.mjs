@@ -74,6 +74,19 @@ test("gets past the API's firewall (it turns away Node's default agent); explain
   mock.state.blockAll = false;
 });
 
+test("the bot's status rotates through how to start, how many servers, and what's playing", async () => {
+  const { presenceLines } = await import("../dist/presence.js");
+  assert.deepEqual(presenceLines({ servers: 3, playing: 0 }).map((l) => l.name), ["/play · /help", "3 servers"]);
+  assert.deepEqual(presenceLines({ servers: 1, playing: 2 }).map((l) => l.name), ["/play · /help", "1 server", "music in 2 servers"]);
+  const env = setup();
+  const set = [];
+  env.client.user.setPresence = (p) => set.push(p.activities[0].name);
+  env.app.presence.tick();
+  env.app.presence.tick();
+  env.app.presence.tick();
+  assert.deepEqual(set, ["/play · /help", "1 server", "/play · /help"]);
+});
+
 test("ranks order and read naturally; weeks start Monday midnight Central, daylight saving included", () => {
   assert.ok(rankValue({ name: "Diamond", div: 1 }) > rankValue({ name: "Diamond", div: 4 }));
   assert.ok(rankValue({ name: "Master", div: 0 }) > rankValue({ name: "Diamond", div: 1 }));
@@ -103,10 +116,31 @@ test("/apex link checks the name, then /apex me and /apex stats show rank, RP, l
   const e = embed(me);
   assert.equal(e.title, "SamTheSniper · PC");
   assert.equal(e.author.name, "u1-nick");
-  assert.match(e.description, /^🟣 \*\*Master\*\* · 16,200 RP\n🔴 1,441 RP to the Predator cutoff \(17,641\)\n⭐ Level 250 · Prestige 1\n🟢 In lobby \(02:14\)$/);
+  assert.equal(
+    e.description,
+    "🟣 **Master** · 16,200 RP\n🔴 1,441 RP to the Predator cutoff (17,641)\n⭐ Level 250 (40% to 251) · Prestige 1 · Battle pass 45\n🟢 In the lobby since <t:1795370000:R>, playing **Wraith**",
+  );
   assert.deepEqual(e.fields[0], { name: "🎯 Wraith's banner", value: "BR Kills: **4,321**\nBR Damage: **1,234,567**" });
   assert.equal(e.thumbnail.url, "https://api.mozambiquehe.re/assets/ranks/master0.png");
-  assert.match(e.footer.text, /only count trackers equipped on banners/);
+  assert.equal(e.image.url, "https://example.test/Wraith_banner.jpg");
+  assert.equal(e.url, "https://apexlegendsstatus.com/profile/uid/PC/1001");
+  assert.match(e.footer.text, /Equip those trackers on the legend's banner/);
+
+  // Another legend's banner stats, and one they haven't played.
+  const hound = await env.run({ command: "apex", sub: "me", options: { legend: "bloodhound" } });
+  assert.deepEqual(embed(hound).fields[0], { name: "🎯 Bloodhound's banner", value: "BR Wins: **87**\nBR Kills: **950**" });
+  assert.equal(embed(hound).image.url, "https://example.test/Bloodhound_banner.jpg");
+  assert.equal(embed(hound).fields.length, 1, "no all-legends kill total on a single-legend view");
+  const life = await env.run({ command: "apex", sub: "me", options: { legend: "Lifeline" } });
+  assert.equal(embed(life).fields[0].value, "*No trackers equipped on this legend's banner.*");
+  const nope = await env.run({ command: "apex", sub: "me", options: { legend: "Bigfoot" } });
+  assert.match(embed(nope).fields[0].value, /No stats for Bigfoot yet/);
+  const ac = await env.run({ command: "apex", focused: "", sub: "me" });
+  const names = ac.log.at(-1).choices.map((c) => c.name);
+  assert.deepEqual(names.slice(0, 3), ["Wraith", "Bloodhound", "Lifeline"], "their own legends come first");
+  assert.ok(names.includes("Octane"), "then everyone else");
+  const typed = await env.run({ command: "apex", focused: "blood", sub: "me" });
+  assert.deepEqual(typed.log.at(-1).choices, [{ name: "Bloodhound", value: "Bloodhound" }]);
 
   const friend = await env.run({ command: "apex", sub: "stats", options: { member: { id: "u2", username: "u2" } } });
   assert.match(text(friend), /<@u2> hasn't linked an Apex account/);
@@ -174,6 +208,10 @@ test("/apex predator and /apex servers", async () => {
   assert.equal(e.title, "🛰️ Apex servers: some are slow");
   assert.match(e.description, /✅ \*\*EA login:\*\* all 2 up\n⚠️ \*\*Matchmaking:\*\* US Central \(slow\)/);
   assert.doesNotMatch(e.description, /selfCoreTest|Status website/, "the status site's own check isn't listed");
+  const d = await env.run({ command: "apex", sub: "servers", options: { details: true } });
+  const fields = embed(d).fields;
+  assert.deepEqual(fields.find((f) => f.name === "Matchmaking"), { name: "Matchmaking", value: "✅ 🇪🇺 EU West\n⚠️ 🇺🇸 US Central", inline: true });
+  assert.equal(fields.find((f) => f.name === "PlayStation / Xbox").value, "✅ 🌐 PlayStation Network\n✅ 🌐 Xbox Live");
 });
 
 test("the leaderboard: linked members of this server, best first, with RP gained since Monday", async () => {
@@ -251,6 +289,7 @@ test("/apex and its /setup options only exist when APEX_API_KEY is set; everythi
   const cmds = env.app.router.guildCommandJson;
   const apex = cmds.find((c) => c.name === "apex");
   assert.deepEqual(apex.options.map((o) => o.name), ["link", "unlink", "me", "stats", "map", "predator", "servers", "leaderboard"]);
+  assert.deepEqual(apex.options.find((o) => o.name === "stats").options.map((o) => o.name), ["member", "player", "platform", "legend"]);
   assert.deepEqual(cmds.find((c) => c.name === "setup").options.map((o) => o.name), ["nowplaying", "apex-leaderboard", "apex-shoutouts"]);
   for (const sub of apex.options) {
     assert.ok(sub.description.length <= 100, sub.name);

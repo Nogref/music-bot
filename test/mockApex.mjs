@@ -1,7 +1,8 @@
 // A fake Apex Legends Status API (api.mozambiquehe.re), shaped like the real responses.
 import http from "node:http";
 
-export function player({ name, uid, platform = "PC", score = 5000, rank = "Gold", div = 2, level = 250, season = "season27_split_1", online = 0, legend = "Wraith", trackers = [{ name: "BR Kills", value: 1234 }] }) {
+export function player({ name, uid, platform = "PC", score = 5000, rank = "Gold", div = 2, level = 250, season = "season27_split_1", online = 0, legend = "Wraith", trackers = [{ name: "BR Kills", value: 1234 }], others = { Bloodhound: [{ name: "BR Wins", value: 87 }, { name: "BR Kills", value: 950 }] }, since = 1795370000 }) {
+  const art = (l) => ({ icon: `https://example.test/${l}.png`, banner: `https://example.test/${l}_banner.jpg` });
   return {
     global: {
       name,
@@ -10,11 +11,20 @@ export function player({ name, uid, platform = "PC", score = 5000, rank = "Gold"
       level,
       levelPrestige: 1,
       toNextLevelPercent: 40,
+      avatar: "",
+      battlepass: { level: "45", history: {} },
       bans: { isActive: false, remainingSeconds: 0, last_banReason: "NONE" },
       rank: { rankScore: score, rankName: rank, rankDiv: div, ladderPosPlatform: -1, rankImg: `https://api.mozambiquehe.re/assets/ranks/${rank.toLowerCase()}${div}.png`, rankedSeason: season },
     },
-    realtime: { lobbyState: "open", isOnline: online, isInGame: 0, canJoin: 1, partyFull: 0, selectedLegend: legend, currentState: online ? "inLobby" : "offline", currentStateAsText: online ? "In lobby (02:14)" : "Offline" },
-    legends: { selected: { LegendName: legend, data: trackers.map((t) => ({ ...t, key: t.name.toLowerCase().replace(/\s/g, "_") })), ImgAssets: { icon: `https://example.test/${legend}.png` } } },
+    realtime: { lobbyState: "open", isOnline: online, isInGame: 0, canJoin: 1, partyFull: 0, selectedLegend: legend, currentState: online ? "inLobby" : "offline", currentStateAsText: online ? "In lobby (02:14)" : "Offline", currentStateSinceTimestamp: online ? since : -1 },
+    legends: {
+      selected: { LegendName: legend, data: trackers.map((t) => ({ ...t, key: t.name.toLowerCase().replace(/\s/g, "_") })), ImgAssets: art(legend) },
+      all: {
+        [legend]: { data: trackers, ImgAssets: art(legend) },
+        ...Object.fromEntries(Object.entries(others).map(([l, data]) => [l, { data, ImgAssets: art(l) }])),
+        Lifeline: { ImgAssets: art("Lifeline") },
+      },
+    },
     total: { kills: { name: "BR Kills", value: trackers.find((t) => /kills/i.test(t.name))?.value ?? -1 }, kd: { value: "-1", name: "KD" } },
   };
 }

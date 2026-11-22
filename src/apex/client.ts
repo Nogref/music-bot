@@ -33,6 +33,18 @@ export interface ApexPlayer {
   legendIcon?: string;
   /** Trackers on the selected legend's banner. */
   trackers: Array<{ name: string; value: number }>;
+  /** Every legend the service knows about for this player, with their banner trackers and art. */
+  legends: Record<string, { trackers: Array<{ name: string; value: number }>; banner?: string; icon?: string }>;
+  /** The selected legend's banner art. */
+  legendBanner?: string;
+  /** "offline" | "inLobby" | "inMatch". */
+  currentState?: string;
+  /** When they entered that state (epoch ms). */
+  stateSince?: number;
+  toNextLevelPercent?: number;
+  battlePassLevel?: number;
+  /** Their profile page on apexlegendsstatus.com. */
+  profileUrl?: string;
   /** BR kills summed over legends' banner trackers, when any are equipped. */
   trackedKills?: number;
   banned: boolean;
@@ -65,6 +77,7 @@ export interface ServerGroup {
   down: number;
   /** Regions that aren't UP. */
   problems: string[];
+  regions: Array<{ name: string; status: "UP" | "SLOW" | "DOWN" }>;
 }
 
 /** The API sits behind a firewall that turns away anonymous clients (HTTP 406), so say who we are. */
@@ -190,16 +203,21 @@ export class ApexClient {
     const out: ServerGroup[] = [];
     for (const [key, regions] of Object.entries(r)) {
       if (!SERVER_GROUPS[key] || !regions || typeof regions !== "object") continue;
-      const g: ServerGroup = { name: SERVER_GROUPS[key], up: 0, slow: 0, down: 0, problems: [] };
+      const g: ServerGroup = { name: SERVER_GROUPS[key], up: 0, slow: 0, down: 0, problems: [], regions: [] };
       for (const [region, info] of Object.entries(regions as Json)) {
         const status = String((info as Json)?.Status ?? "").toUpperCase();
-        if (status === "UP") g.up++;
-        else if (status === "SLOW") {
+        const nice = regionName(region);
+        if (status === "UP") {
+          g.up++;
+          g.regions.push({ name: nice, status: "UP" });
+        } else if (status === "SLOW") {
           g.slow++;
-          g.problems.push(`${region.replace(/[-_]/g, " ")} (slow)`);
+          g.problems.push(`${nice} (slow)`);
+          g.regions.push({ name: nice, status: "SLOW" });
         } else if (status) {
           g.down++;
-          g.problems.push(`${region.replace(/[-_]/g, " ")} (down)`);
+          g.problems.push(`${nice} (down)`);
+          g.regions.push({ name: nice, status: "DOWN" });
         }
       }
       if (g.up + g.slow + g.down) out.push(g);
@@ -208,15 +226,50 @@ export class ApexClient {
   }
 }
 
+/** "EU-West" → "EU West", "SouthAmerica" → "South America", "Playstation-Network" → "PlayStation Network". */
+function regionName(region: string): string {
+  return region
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[-_+]/g, " ")
+    .replace(/\bPlaystation\b/i, "PlayStation")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+/** A flag for a region name, when there's an obvious one. */
+export function regionFlag(region: string): string {
+  const r = region.toLowerCase();
+  if (/^eu|europe/.test(r)) return "🇪🇺";
+  if (/^us|united states|america\b(?!.*south)/.test(r) && !/south/.test(r)) return "🇺🇸";
+  if (/asia|japan|tokyo|singapore/.test(r)) return "🌏";
+  if (/south america|brazil/.test(r)) return "🇧🇷";
+  if (/oceania|australia|sydney/.test(r)) return "🇦🇺";
+  return "🌐";
+}
+
 function parsePlayer(r: Json, platform: string): ApexPlayer {
   const g = (r.global ?? {}) as Json;
   if (!g.name && !g.uid) throw new ApiError("the Apex stats service", "http", "Player not found", 404);
   const rank = (g.rank ?? {}) as Json;
   const rt = (r.realtime ?? {}) as Json;
   const sel = (r.legends?.selected ?? {}) as Json;
-  const trackers = (Array.isArray(sel.data) ? sel.data : [])
-    .map((t: Json) => ({ name: String(t.name ?? t.key ?? "Tracker"), value: Number(t.value) }))
-    .filter((t: { value: number }) => Number.isFinite(t.value));
+  const trackersOf = (data: unknown) =>
+    (Array.isArray(data) ? data : [])
+      .map((t: Json) => ({ name: String(t.name ?? t.key ?? "Tracker"), value: Number(t.value) }))
+      .filter((t: { value: number }) => Number.isFinite(t.value) && t.value >= 0);
+  const trackers = trackersOf(sel.data);
+  const legends: ApexPlayer["legends"] = {};
+  for (const [name, l] of Object.entries((r.legends?.all ?? {}) as Json)) {
+    if (!l || typeof l !== "object") continue;
+    legends[name] = {
+      trackers: trackersOf((l as Json).data),
+      banner: typeof (l as Json).ImgAssets?.banner === "string" ? (l as Json).ImgAssets.banner : undefined,
+      icon: typeof (l as Json).ImgAssets?.icon === "string" ? (l as Json).ImgAssets.icon : undefined,
+    };
+  }
+  const since = Number(rt.currentStateSinceTimestamp);
+  const bp = Number(g.battlepass?.level);
+  const pct = Number(g.toNextLevelPercent);
   let trackedKills: number | undefined;
   const totalKills = Number(r.total?.kills?.value);
   if (Number.isFinite(totalKills) && totalKills > 0) trackedKills = totalKills;
@@ -239,6 +292,13 @@ function parsePlayer(r: Json, platform: string): ApexPlayer {
     state: typeof rt.currentStateAsText === "string" ? rt.currentStateAsText : undefined,
     legend: typeof sel.LegendName === "string" ? sel.LegendName : typeof rt.selectedLegend === "string" ? rt.selectedLegend : undefined,
     legendIcon: typeof sel.ImgAssets?.icon === "string" ? sel.ImgAssets.icon : undefined,
+    legendBanner: typeof sel.ImgAssets?.banner === "string" ? sel.ImgAssets.banner : undefined,
+    currentState: typeof rt.currentState === "string" ? rt.currentState : undefined,
+    stateSince: Number.isFinite(since) && since > 0 ? since * 1000 : undefined,
+    toNextLevelPercent: Number.isFinite(pct) && pct >= 0 ? pct : undefined,
+    battlePassLevel: Number.isFinite(bp) && bp > 0 ? bp : undefined,
+    profileUrl: g.uid ? `https://apexlegendsstatus.com/profile/uid/${encodeURIComponent(String(g.platform ?? platform))}/${encodeURIComponent(String(g.uid))}` : undefined,
+    legends,
     trackers,
     trackedKills,
     banned: g.bans?.isActive === true,

@@ -78,9 +78,9 @@ If your DMs are closed to the bot, the request waits; open them (Server → Priv
 Turn it on with a free key from [apexlegendsapi.com](https://apexlegendsapi.com) (Apex Legends Status) in `APEX_API_KEY`. Without one, the `/apex` commands don't appear.
 
 - **`/apex link player platform`**: each person links their in-game name once (on PC, the EA account name, even if they play through Steam). The bot checks the name exists before saving it. Server admins can link someone else with `member:@friend` (and `/apex unlink member:@friend`); they can still unlink themselves.
-- **`/apex me`**, **`/apex stats member:@friend`** (or `player:` for anyone): rank and RP (and how far from the Predator cutoff, for Masters), level, online status, and the trackers on their current legend's banner.
+- **`/apex me`**, **`/apex stats member:@friend`** (or `player:` for anyone): rank and RP (and how far from the Predator cutoff, for Masters), level and progress to the next one, battle pass level, whether they're in the lobby or a match (and since when), and the trackers on their current legend's banner, with the legend's banner art. Add `legend:` to see another legend's banner stats. The title links to their apexlegendsstatus.com profile.
 - **`/apex map`**: the Pubs and Ranked maps right now, when they change, and what's next, with the map pictures.
-- **`/apex predator`**: the RP it takes to be Apex Predator on each platform. **`/apex servers`**: whether EA login and matchmaking are up.
+- **`/apex predator`**: the RP it takes to be Apex Predator on each platform. **`/apex servers`**: whether EA login and matchmaking are up; `details:True` lists every region.
 - **Squad leaderboard**: `/setup apex-leaderboard channel:#apex` posts a board that updates itself, with everyone who's linked and in this server, best rank first, and **RP gained since Monday 12 AM** (`TIMEZONE`, Central by default). `/apex leaderboard` shows it to anyone, anywhere.
 - **Rank-up shout-outs**: when someone reaches a new high for the season (e.g. Platinum III → Platinum II), the bot celebrates in the leaderboard's channel. Dropping and re-climbing doesn't count twice, and the reset at a new ranked season is ignored. `/setup apex-shoutouts channel:#…` moves them; without a channel it turns them off.
 
@@ -89,6 +89,8 @@ The bot checks each linked player every `APEX_POLL_MINUTES` (15). Things to know
 - There's no official Apex stats API. Kills, damage and wins only exist for **trackers equipped on legends' banners**; rank, RP and level are always there.
 - RP this week starts counting from the first check, so it's partial for the week someone links.
 - Match history isn't available on free keys, so the bot can't list games or per-match stats.
+
+The bot's status line rotates between `/play · /help`, how many servers it's in, and how many are playing music.
 
 ## Troubleshooting
 

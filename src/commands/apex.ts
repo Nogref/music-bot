@@ -9,12 +9,13 @@ import {
   InteractionContextType,
   MessageFlags,
   SlashCommandBuilder,
+  type AutocompleteInteraction,
   type ChatInputCommandInteraction,
   type Client,
   type Guild,
   type GuildMember,
 } from "discord.js";
-import { ApexClient, PLATFORMS, platformName, type ApexPlayer, type MapRotation, type PredatorCut } from "../apex/client.js";
+import { ApexClient, PLATFORMS, platformName, regionFlag, type ApexPlayer, type MapRotation, type PredatorCut } from "../apex/client.js";
 import { fmtNum, rankEmoji, rankLabel, rankValue } from "../apex/ranks.js";
 import { ApexStore } from "../apex/store.js";
 import { ApexTracker } from "../apex/tracker.js";
@@ -37,6 +38,11 @@ export interface ApexDeps {
 }
 
 const MASTER = rankValue({ name: "Master", div: 0 });
+/** Starting list for legend suggestions; anything the API returns is added as it's seen. */
+const LEGENDS = [
+  "Alter", "Ash", "Ballistic", "Bangalore", "Bloodhound", "Catalyst", "Caustic", "Conduit", "Crypto", "Fuse", "Gibraltar", "Horizon", "Lifeline", "Loba",
+  "Mad Maggie", "Mirage", "Newcastle", "Octane", "Pathfinder", "Rampart", "Revenant", "Seer", "Sparrow", "Valkyrie", "Vantage", "Wattson", "Wraith",
+];
 const ts = (ms: number, style = "R") => `<t:${Math.floor(ms / 1000)}:${style}>`;
 
 export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; astore: ApexStore; setup: SetupPart[] } {
@@ -63,29 +69,81 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
     return undefined;
   }
 
-  async function statsEmbed(p: ApexPlayer, discordName?: string): Promise<EmbedBuilder> {
+  /** The player's card: rank, level, what they're doing now, and one legend's banner trackers (theirs, or the one asked for). */
+  async function statsEmbed(p: ApexPlayer, discordName?: string, legendWanted?: string): Promise<EmbedBuilder> {
+    remember(p);
     const label = rankLabel(p.rank);
     const lines = [`${rankEmoji(p.rank.name)} **${label}** · ${fmtNum(p.rank.score)} RP${p.rank.ladderPos ? ` · #${fmtNum(p.rank.ladderPos)} on ${platformName(p.platform)}` : ""}`];
     if (rankValue(p.rank) >= MASTER) {
       const cut = (await predator().catch(() => [] as PredatorCut[])).find((c) => c.platform === p.platform);
       if (cut) lines.push(p.rank.score >= cut.rp ? `🔴 Above the Predator cutoff (${fmtNum(cut.rp)} RP)` : `🔴 ${fmtNum(cut.rp - p.rank.score)} RP to the Predator cutoff (${fmtNum(cut.rp)})`);
     }
-    lines.push(`⭐ Level ${fmtNum(p.level)}${p.prestige ? ` · Prestige ${p.prestige}` : ""}`);
-    lines.push(p.online ? `🟢 ${p.state ?? (p.inGame ? "In a match" : "Online")}` : "⚫ Offline");
+    const level = [`⭐ Level ${fmtNum(p.level)}${p.toNextLevelPercent !== undefined ? ` (${p.toNextLevelPercent}% to ${fmtNum(p.level + 1)})` : ""}`];
+    if (p.prestige) level.push(`Prestige ${p.prestige}`);
+    if (p.battlePassLevel) level.push(`Battle pass ${p.battlePassLevel}`);
+    lines.push(level.join(" · "));
+    const since = p.stateSince ? ` since ${ts(p.stateSince)}` : "";
+    const as = p.legend ? `, playing **${p.legend}**` : "";
+    if (p.currentState === "inMatch") lines.push(`🟠 In a match${since}${as}`);
+    else if (p.currentState === "inLobby") lines.push(`🟢 In the lobby${since}${as}`);
+    else if (p.online) lines.push(`🟢 ${p.state ?? (p.inGame ? "In a match" : "Online")}`);
+    else lines.push("⚫ Offline");
     if (p.banned) lines.push("⛔ Has an active ban or matchmaking penalty");
     const e = new EmbedBuilder()
       .setColor(Colors.info)
       .setTitle(truncate(`${p.name} · ${platformName(p.platform)}`, 256))
       .setDescription(lines.join("\n"))
-      .setFooter({ text: "Kills and other stats only count trackers equipped on banners · apexlegendsstatus.com" });
+      .setFooter({ text: "Wrong or missing numbers? Equip those trackers on the legend's banner in-game, then check again · apexlegendsstatus.com" });
+    if (p.profileUrl) e.setURL(p.profileUrl);
     if (discordName) e.setAuthor({ name: discordName });
     if (p.rank.img) e.setThumbnail(p.rank.img);
-    if (p.legend) {
-      const trackers = p.trackers.slice(0, 3).map((t) => `${t.name}: **${fmtNum(t.value)}**`);
-      e.addFields({ name: `🎯 ${p.legend}'s banner`, value: trackers.length ? trackers.join("\n") : "*No trackers equipped on this legend's banner.*" });
+
+    // Which legend to show: the one asked for, else the one they have selected.
+    const wanted = legendWanted?.trim();
+    const key = wanted ? Object.keys(p.legends).find((k) => k.toLowerCase() === wanted.toLowerCase()) : p.legend;
+    const legend = key ? p.legends[key] : undefined;
+    const trackers = wanted ? (legend?.trackers ?? []) : p.trackers.length ? p.trackers : (legend?.trackers ?? []);
+    const shownName = key ?? wanted;
+    if (shownName) {
+      e.addFields({
+        name: `🎯 ${shownName}'s banner`,
+        value: trackers.length
+          ? trackers
+              .slice(0, 6)
+              .map((t) => `${t.name}: **${fmtNum(t.value)}**`)
+              .join("\n")
+          : wanted && !legend
+            ? `*No stats for ${truncate(wanted, 40)} yet. They show up once ${p.name} has played them with trackers on the banner.*`
+            : "*No trackers equipped on this legend's banner.*",
+      });
     }
-    if (p.trackedKills) e.addFields({ name: "💀 Kills on tracked banners", value: fmtNum(p.trackedKills), inline: true });
+    const banner = (wanted ? legend?.banner : p.legendBanner ?? legend?.banner) ?? undefined;
+    if (banner) e.setImage(banner);
+    if (p.trackedKills && !wanted) e.addFields({ name: "💀 Kills on tracked banners", value: fmtNum(p.trackedKills), inline: true });
     return e;
+  }
+
+  // Legends seen in lookups, for the legend: suggestions (new legends show up here without a bot update).
+  const seenLegends = new Set(LEGENDS);
+  const legendsByUid = new Map<string, string[]>();
+  function remember(p: ApexPlayer) {
+    const names = Object.keys(p.legends);
+    for (const n of names) seenLegends.add(n);
+    if (p.uid && names.length) legendsByUid.set(p.uid, names);
+  }
+
+  async function legendSuggestions(i: AutocompleteInteraction) {
+    const typed = i.options.getFocused().toLowerCase();
+    const member = i.options.get("member")?.value as string | undefined;
+    const link = astore.link(member ?? i.user.id);
+    const theirs = link ? (legendsByUid.get(link.uid) ?? []) : [];
+    const all = [...new Set([...theirs, ...[...seenLegends].sort()])];
+    await i.respond(
+      all
+        .filter((n) => n.toLowerCase().includes(typed))
+        .slice(0, 25)
+        .map((n) => ({ name: n, value: n })),
+    );
   }
 
   const memberName = (i: ChatInputCommandInteraction) => (i.member as GuildMember | null)?.displayName ?? i.user.username;
@@ -149,10 +207,11 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
     const member = self ? null : i.options.getUser("member");
     const typed = self ? null : i.options.getString("player")?.trim();
     const platform = (self ? null : i.options.getString("platform")) ?? "PC";
+    const legendWanted = i.options.getString("legend") ?? undefined;
     await i.deferReply();
     if (typed) {
       try {
-        return void (await i.editReply({ embeds: [await statsEmbed(await apex.player(typed, platform))] }));
+        return void (await i.editReply({ embeds: [await statsEmbed(await apex.player(typed, platform), undefined, legendWanted)] }));
       } catch (err) {
         const nf = notFound(err, typed, platform);
         if (nf) return void (await i.editReply(nf));
@@ -171,7 +230,7 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
     const p = await apex.playerByUid(l.uid, l.platform);
     await tracker.record(l, p);
     const shown = member ? ((i.guild ? await tracker.memberName(i.guild as Guild, userId) : undefined) ?? member.username) : memberName(i);
-    await i.editReply({ embeds: [await statsEmbed(p, shown)], allowedMentions: { parse: [] } });
+    await i.editReply({ embeds: [await statsEmbed(p, shown, legendWanted)], allowedMentions: { parse: [] } });
   }
 
   async function mapsCmd(i: ChatInputCommandInteraction) {
@@ -216,22 +275,29 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
     await i.deferReply();
     const groups = await cached("servers", 2 * 60_000, () => apex.servers());
     if (!groups.length) return void (await i.editReply("I couldn't get the server status right now. Try again in a minute."));
-    const lines = groups.map((g) => {
-      const total = g.up + g.slow + g.down;
-      if (!g.slow && !g.down) return `✅ **${g.name}:** all ${total} up`;
-      return `${g.down ? "❌" : "⚠️"} **${g.name}:** ${truncate(g.problems.join(", "), 200)}`;
-    });
+    const icon = { UP: "✅", SLOW: "⚠️", DOWN: "❌" } as const;
     const bad = groups.some((g) => g.down);
     const slow = groups.some((g) => g.slow);
-    await i.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(bad ? Colors.bad : slow ? Colors.warn : Colors.ok)
-          .setTitle(bad ? "🛰️ Apex servers: some are down" : slow ? "🛰️ Apex servers: some are slow" : "🛰️ Apex servers: all good")
-          .setDescription(lines.join("\n"))
-          .setFooter({ text: "From apexlegendsstatus.com · not always the full picture" }),
-      ],
-    });
+    const e = new EmbedBuilder()
+      .setColor(bad ? Colors.bad : slow ? Colors.warn : Colors.ok)
+      .setTitle(bad ? "🛰️ Apex servers: some are down" : slow ? "🛰️ Apex servers: some are slow" : "🛰️ Apex servers: all good")
+      .setFooter({ text: "From apexlegendsstatus.com · not always the full picture" });
+    if (i.options.getBoolean("details")) {
+      e.addFields(
+        groups.slice(0, 24).map((g) => ({
+          name: g.name,
+          value: truncate(g.regions.map((r) => `${icon[r.status]} ${regionFlag(r.name)} ${r.name}`).join("\n"), 1024) || "—",
+          inline: true,
+        })),
+      );
+    } else {
+      e.setDescription(
+        groups
+          .map((g) => (!g.slow && !g.down ? `✅ **${g.name}:** all ${g.up} up` : `${g.down ? "❌" : "⚠️"} **${g.name}:** ${truncate(g.problems.join(", "), 200)}`))
+          .join("\n") + "\n-# `/apex servers details:True` shows every region.",
+      );
+    }
+    await i.editReply({ embeds: [e] });
   }
 
   async function leaderboard(i: ChatInputCommandInteraction) {
@@ -260,18 +326,29 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
         .setDescription("Unlink your Apex account and leave the leaderboard")
         .addUserOption((o) => o.setName("member").setDescription("Server admins: unlink this member instead of yourself")),
     )
-    .addSubcommand((s) => s.setName("me").setDescription("Your rank, RP, level and banner stats"))
+    .addSubcommand((s) =>
+      s
+        .setName("me")
+        .setDescription("Your rank, RP, level and banner stats")
+        .addStringOption((o) => o.setName("legend").setDescription("Show this legend's banner stats instead").setAutocomplete(true).setMaxLength(40)),
+    )
     .addSubcommand((s) =>
       s
         .setName("stats")
         .setDescription("Someone's rank, RP, level and banner stats")
         .addUserOption((o) => o.setName("member").setDescription("A member who's linked their account"))
         .addStringOption((o) => o.setName("player").setDescription("Or any in-game name").setMaxLength(64))
-        .addStringOption((o) => o.setName("platform").setDescription("Platform for that name (default PC)").addChoices(...PLATFORMS)),
+        .addStringOption((o) => o.setName("platform").setDescription("Platform for that name (default PC)").addChoices(...PLATFORMS))
+        .addStringOption((o) => o.setName("legend").setDescription("Show this legend's banner stats instead").setAutocomplete(true).setMaxLength(40)),
     )
     .addSubcommand((s) => s.setName("map").setDescription("The Pubs and Ranked maps right now, and what's next"))
     .addSubcommand((s) => s.setName("predator").setDescription("How much RP it takes to be Apex Predator right now"))
-    .addSubcommand((s) => s.setName("servers").setDescription("Are the Apex servers up?"))
+    .addSubcommand((s) =>
+      s
+        .setName("servers")
+        .setDescription("Are the Apex servers up?")
+        .addBooleanOption((o) => o.setName("details").setDescription("Show every region")),
+    )
     .addSubcommand((s) => s.setName("leaderboard").setDescription("The squad leaderboard for this server"))
     .toJSON();
 
@@ -323,6 +400,7 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
     guildCommands: [
       {
         json: { ...json, contexts: [InteractionContextType.Guild] },
+        autocomplete: (i) => legendSuggestions(i),
         execute: async (i) => {
           try {
             await run(i);

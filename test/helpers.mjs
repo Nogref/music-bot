@@ -183,6 +183,7 @@ export function fakeInteraction(client, { guild, command, sub, options = {}, cus
     deferred: false,
     replied: false,
     options: {
+      get: (n) => (options[n] === undefined || options[n] === null ? null : { name: n, value: options[n]?.id ?? options[n] }),
       getUser: (n) => options[n] ?? null,
       getString: (n, req) => opt(n, req),
       getBoolean: (n) => options[n] ?? null,

@@ -9,6 +9,7 @@ import type { Config } from "./config.js";
 import type { Store } from "./core/db.js";
 import { Router, type Feature } from "./core/router.js";
 import type { VoiceLinkFactory } from "./player/voice.js";
+import { presenceFeature } from "./presence.js";
 import type { SubsonicClient } from "./services/subsonic.js";
 
 export interface AppDeps {
@@ -29,7 +30,11 @@ export function buildApp(d: AppDeps) {
   const apex = d.cfg.apex ? apexFeature({ cfg: d.cfg.apex, store: d.store, client: d.client, isApproved: (id) => servers.isApproved(id), gapMs: d.apexGapMs }) : undefined;
   const help = helpFeature({ apex: Boolean(apex) });
   const setup = setupFeature([...player.setup, ...(apex?.setup ?? [])]);
-  const features: Feature[] = [player, ...(apex ? [apex] : []), help, setup, servers];
+  const presence = presenceFeature(d.client, () => ({
+    servers: d.client.guilds.cache.filter((g) => servers.isApproved(g.id)).size,
+    playing: [...player.sessions.values()].filter((s) => s.current && !s.ended).length,
+  }));
+  const features: Feature[] = [player, ...(apex ? [apex] : []), help, setup, servers, presence];
   router = new Router(features, (id) => servers.isApproved(id));
-  return { router, player, apex, servers, help, features };
+  return { router, player, apex, servers, help, presence, features };
 }
