@@ -67,6 +67,20 @@ export interface ServerGroup {
   problems: string[];
 }
 
+/** The API sits behind a firewall that turns away anonymous clients (HTTP 406), so say who we are. */
+export const USER_AGENT = "music-bot/1.0 (+https://github.com/Nogref/music-bot)";
+
+/** What its status codes mean (the API's own error list), for logs and replies. */
+const STATUS_TEXT: Record<number, string> = {
+  400: "the request was refused; try again in a few minutes",
+  403: "the API key wasn't accepted",
+  404: "player not found",
+  405: "EA's servers didn't answer the stats service",
+  406: "the request was blocked by the stats service's firewall",
+  410: "unknown platform",
+  429: "too many requests",
+};
+
 const SERVER_GROUPS: Record<string, string> = {
   Origin_login: "EA login",
   EA_novafusion: "Matchmaking",
@@ -96,7 +110,16 @@ export class ApexClient {
         const u = new URL(`${this.cfg.url}${path}`);
         for (const [k, v] of Object.entries({ ...params, auth: this.cfg.apiKey })) u.searchParams.set(k, v);
         try {
-          const body = await request<Json>(this.name, u.toString());
+          // Read as text: errors don't always come back as JSON, whatever the Accept header says.
+          const raw = await request<string>(this.name, u.toString(), { as: "text", headers: { Accept: "application/json, text/plain, */*", "User-Agent": USER_AGENT } });
+          let body: Json;
+          try {
+            body = JSON.parse(raw) as Json;
+          } catch {
+            const plain = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+            if (/not found/i.test(plain)) throw new ApiError(this.name, "http", plain, 404);
+            throw new ApiError(this.name, "parse", `the Apex stats service sent something that isn't JSON: ${plain || "(empty)"}`);
+          }
           const err = typeof body?.Error === "string" ? body.Error : typeof body?.error === "string" ? body.error : undefined;
           if (err) {
             if (/slow down|rate limit|too many/i.test(err)) throw new ApiError(this.name, "http", err, 429);
@@ -106,6 +129,10 @@ export class ApexClient {
           }
           return body as T;
         } catch (e) {
+          if (e instanceof ApiError && e.kind === "http" && e.status && STATUS_TEXT[e.status] && !e.message.includes(STATUS_TEXT[e.status])) {
+            // Name what the code means (the raw reply is kept in the message for the log).
+            e = new ApiError(this.name, "http", `${e.message} (${STATUS_TEXT[e.status]})`, e.status, (e as ApiError).body);
+          }
           if (e instanceof ApiError && e.status === 429 && attempt === 0) {
             await new Promise((r) => setTimeout(r, Math.max(2000, this.gapMs * 3)));
             continue;

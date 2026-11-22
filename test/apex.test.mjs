@@ -56,6 +56,24 @@ test("API client: players, the 200-with-an-Error quirk, slowing down when told t
   assert.equal(redact(`${mock.base}/bridge?player=x&auth=apex-key`), `${mock.base}/bridge?player=x&auth=***`);
 });
 
+test("gets past the API's firewall (it turns away Node's default agent); explains a refusal in the log and politely to members", async () => {
+  const plain = await fetch(`${mock.base}/maprotation?auth=apex-key&version=2`);
+  assert.equal(plain.status, 406, "the fake really does block plain fetch");
+  const c = new ApexClient(apexCfg(), 0);
+  assert.equal((await c.maps()).pubs.current.map, "World's Edge");
+  assert.match(mock.calls.at(-1).userAgent, /^music-bot\/1\.0/);
+
+  mock.state.blockAll = true;
+  await assert.rejects(c.maps(), (e) => {
+    assert.match(e.message, /returned HTTP 406: 406 Not Acceptable Not Acceptable! An appropriate representation .* \(the request was blocked by the stats service's firewall\)/);
+    return true;
+  });
+  const env = setup();
+  const i = await env.run({ command: "apex", sub: "map" });
+  assert.equal(i.last().content, "⚠️ The Apex stats service isn't answering properly right now. Try again in a minute.");
+  mock.state.blockAll = false;
+});
+
 test("ranks order and read naturally; weeks start Monday midnight Central, daylight saving included", () => {
   assert.ok(rankValue({ name: "Diamond", div: 1 }) > rankValue({ name: "Diamond", div: 4 }));
   assert.ok(rankValue({ name: "Master", div: 0 }) > rankValue({ name: "Diamond", div: 1 }));

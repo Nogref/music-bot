@@ -20,8 +20,9 @@ import { ApexStore } from "../apex/store.js";
 import { ApexTracker } from "../apex/tracker.js";
 import type { Config } from "../config.js";
 import type { Store } from "../core/db.js";
-import { Colors, truncate } from "../core/discord.js";
+import { Colors, respond, truncate } from "../core/discord.js";
 import { ApiError } from "../core/http.js";
+import { log } from "../core/logger.js";
 import type { Feature } from "../core/router.js";
 import { TtlCache } from "../core/ttlCache.js";
 import type { SetupPart } from "./setup.js";
@@ -291,28 +292,54 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
       {
         json: { ...json, contexts: [InteractionContextType.Guild] },
         execute: async (i) => {
-          switch (i.options.getSubcommand()) {
-            case "link":
-              return link(i);
-            case "unlink":
-              return unlink(i);
-            case "me":
-              return stats(i, true);
-            case "stats":
-              return stats(i, false);
-            case "map":
-              return mapsCmd(i);
-            case "predator":
-              return predatorCmd(i);
-            case "servers":
-              return serversCmd(i);
-            case "leaderboard":
-              return leaderboard(i);
+          try {
+            await run(i);
+          } catch (err) {
+            if (!(err instanceof ApiError)) throw err;
+            log.warn(`apex: /apex ${i.options.getSubcommand()} failed: ${err.message}`);
+            await respond(
+              i,
+              err.status === 403
+                ? "⚠️ The Apex stats service didn't accept the bot's API key. The bot's owner needs to check `APEX_API_KEY`."
+                : err.status === 429
+                  ? "⏳ The Apex stats service is busy. Try again in a few seconds."
+                  : "⚠️ The Apex stats service isn't answering properly right now. Try again in a minute.",
+            );
           }
         },
       },
     ],
-    start: () => tracker.start(),
+    start: async () => {
+      tracker.start();
+      // One cheap call so a bad key or a blocked request shows up in the log straight away.
+      try {
+        const m = await maps();
+        log.info(`apex: connected to the Apex stats service (pubs map: ${m.pubs?.current.map ?? "?"})`);
+      } catch (err) {
+        log.error(`apex: the Apex stats service refused the bot: ${(err as Error).message}`);
+      }
+    },
     stop: () => tracker.stop(),
   };
+
+  async function run(i: ChatInputCommandInteraction) {
+    switch (i.options.getSubcommand()) {
+      case "link":
+        return link(i);
+      case "unlink":
+        return unlink(i);
+      case "me":
+        return stats(i, true);
+      case "stats":
+        return stats(i, false);
+      case "map":
+        return mapsCmd(i);
+      case "predator":
+        return predatorCmd(i);
+      case "servers":
+        return serversCmd(i);
+      case "leaderboard":
+        return leaderboard(i);
+    }
+  }
 }

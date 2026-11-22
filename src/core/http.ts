@@ -57,7 +57,11 @@ function buildUrl(base: string, query?: RequestOptions["query"]): string {
 /** Extracts a human-readable message from a JSON or text error body. */
 function messageFrom(body: unknown): string | undefined {
   if (!body) return undefined;
-  if (typeof body === "string") return body.slice(0, 200);
+  if (typeof body === "string") {
+    // Plain text or an HTML error page: drop the markup.
+    const plain = body.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return plain ? plain.slice(0, 200) : undefined;
+  }
   if (typeof body === "object") {
     const b = body as Record<string, unknown>;
     for (const key of ["message", "error", "errorMessage", "detail"]) {
@@ -101,16 +105,21 @@ export async function requestRaw<T = unknown>(service: string, url: string, opts
 
   const as = opts.as ?? "json";
   let data: unknown;
+  let text: string | undefined;
   try {
     if (as === "buffer") data = Buffer.from(await res.arrayBuffer());
     else if (as === "none") data = undefined;
     else {
-      const text = await res.text();
+      text = await res.text();
       if (as === "text") data = text;
       else data = text ? JSON.parse(text) : undefined;
     }
   } catch {
-    if (!res.ok) throw new ApiError(service, "http", `${service} returned HTTP ${res.status}`, res.status);
+    if (!res.ok) {
+      // Not JSON (often a firewall's HTML page): keep a short, tag-free snippet for the log.
+      const snippet = (text ?? "").replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+      throw new ApiError(service, "http", `${service} returned HTTP ${res.status}${snippet ? `: ${snippet}` : ""}`, res.status, text);
+    }
     throw new ApiError(service, "parse", `${service} returned a response that isn't valid JSON`, res.status);
   }
 
