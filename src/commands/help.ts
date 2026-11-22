@@ -35,7 +35,7 @@ export function helpFeature(opts: { apex?: boolean } = {}): Feature {
       e.addFields({
         name: "🎯 Apex Legends",
         value: [
-          "`/apex link`: link your account once (puts you on the squad leaderboard).",
+          "`/apex link`: link your account once (puts you on the squad leaderboard). Admins can add `member:` to link someone else.",
           "`/apex me` · `/apex stats @friend`: rank, RP, level and banner trackers.",
           "`/apex map`: Pubs and Ranked maps now and next · `/apex predator` · `/apex servers` · `/apex leaderboard`",
         ].join("\n"),

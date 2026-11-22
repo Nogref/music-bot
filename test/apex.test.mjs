@@ -119,6 +119,37 @@ test("/apex link checks the name, then /apex me and /apex stats show rank, RP, l
   assert.match(text(gone), /Unlinked/);
 });
 
+test("server admins can link and unlink someone else; members can only do themselves", async () => {
+  const env = setup();
+  mock.setPlayer({ name: "JoPlays", uid: "3003", platform: "PS4", score: 6000, rank: "Gold", div: 1 });
+  const jo = { id: "u2", username: "u2", bot: false };
+  const notAdmin = await env.run({ command: "apex", sub: "link", options: { player: "JoPlays", platform: "PS4", member: jo } });
+  assert.match(text(notAdmin), /Only server admins can link or unlink someone else/);
+  assert.equal(env.astore.link("u2"), undefined);
+
+  const ok = await env.run({ command: "apex", sub: "link", options: { player: "JoPlays", platform: "PS4", member: jo }, admin: true });
+  assert.equal(text(ok), "✅ Linked <@u2> to **JoPlays** on PlayStation. They're on the squad leaderboard now, and can undo it with `/apex unlink`.");
+  assert.equal(embed(ok).author.name, "u2-nick");
+  assert.deepEqual(ok.last().allowedMentions, { parse: [] });
+  assert.equal(env.astore.link("u2").uid, "3003");
+  assert.equal(env.astore.link("u1"), undefined, "the admin isn't linked");
+
+  mock.setPlayer({ name: "JoAlt", uid: "3004", platform: "PS4" });
+  const swap = await env.run({ command: "apex", sub: "link", options: { player: "JoAlt", platform: "PS4", member: jo }, admin: true });
+  assert.match(text(swap), /\(was \*\*JoPlays\*\*\)/);
+  const bot = await env.run({ command: "apex", sub: "link", options: { player: "JoPlays", platform: "PS4", member: { id: "b1", username: "b1", bot: true } }, admin: true });
+  assert.match(text(bot), /Bots don't play Apex/);
+
+  const denied = await env.run({ command: "apex", sub: "unlink", options: { member: jo } });
+  assert.match(text(denied), /Only server admins/);
+  const removed = await env.run({ command: "apex", sub: "unlink", options: { member: jo }, admin: true });
+  assert.equal(text(removed), "👋 Unlinked <@u2>. They're off the leaderboard.");
+  assert.equal(env.astore.link("u2"), undefined);
+  // Anyone can still pass themselves.
+  const self = await env.run({ command: "apex", sub: "link", options: { player: "JoPlays", platform: "PS4", member: { id: "u1", username: "u1", bot: false } } });
+  assert.match(text(self), /Linked you to \*\*JoPlays\*\*/);
+});
+
 test("/apex map shows Pubs and Ranked, now and next, with the map pictures", async () => {
   const env = setup();
   const m = await env.run({ command: "apex", sub: "map" });

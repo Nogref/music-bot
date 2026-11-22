@@ -77,7 +77,7 @@ If your DMs are closed to the bot, the request waits; open them (Server → Priv
 
 Turn it on with a free key from [apexlegendsapi.com](https://apexlegendsapi.com) (Apex Legends Status) in `APEX_API_KEY`. Without one, the `/apex` commands don't appear.
 
-- **`/apex link player platform`**: each person links their in-game name once (on PC, the EA account name, even if they play through Steam). The bot checks the name exists before saving it.
+- **`/apex link player platform`**: each person links their in-game name once (on PC, the EA account name, even if they play through Steam). The bot checks the name exists before saving it. Server admins can link someone else with `member:@friend` (and `/apex unlink member:@friend`); they can still unlink themselves.
 - **`/apex me`**, **`/apex stats member:@friend`** (or `player:` for anyone): rank and RP (and how far from the Predator cutoff, for Masters), level, online status, and the trackers on their current legend's banner.
 - **`/apex map`**: the Pubs and Ranked maps right now, when they change, and what's next, with the map pictures.
 - **`/apex predator`**: the RP it takes to be Apex Predator on each platform. **`/apex servers`**: whether EA login and matchmaking are up.

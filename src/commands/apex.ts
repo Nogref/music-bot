@@ -20,7 +20,7 @@ import { ApexStore } from "../apex/store.js";
 import { ApexTracker } from "../apex/tracker.js";
 import type { Config } from "../config.js";
 import type { Store } from "../core/db.js";
-import { Colors, respond, truncate } from "../core/discord.js";
+import { Colors, isServerAdmin, respond, truncate } from "../core/discord.js";
 import { ApiError } from "../core/http.js";
 import { log } from "../core/logger.js";
 import type { Feature } from "../core/router.js";
@@ -90,9 +90,21 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
 
   const memberName = (i: ChatInputCommandInteraction) => (i.member as GuildMember | null)?.displayName ?? i.user.username;
 
+  /** Server admins can link or unlink someone else; everyone else only themselves. Returns the target, or a refusal. */
+  async function target(i: ChatInputCommandInteraction): Promise<{ id: string; self: boolean; name: string } | string> {
+    const member = i.options.getUser("member");
+    if (!member || member.id === i.user.id) return { id: i.user.id, self: true, name: memberName(i) };
+    if (!isServerAdmin(i)) return "Only server admins can link or unlink someone else. Ask them to run `/apex link` themselves.";
+    if (member.bot) return "Bots don't play Apex.";
+    const shown = (i.guild ? await tracker.memberName(i.guild as Guild, member.id) : undefined) ?? member.username;
+    return { id: member.id, self: false, name: shown };
+  }
+
   async function link(i: ChatInputCommandInteraction) {
     const name = i.options.getString("player", true).trim();
     const platform = i.options.getString("platform", true);
+    const who = await target(i);
+    if (typeof who === "string") return void (await i.reply({ content: who, flags: MessageFlags.Ephemeral }));
     await i.deferReply({ flags: MessageFlags.Ephemeral });
     let p: ApexPlayer;
     try {
@@ -102,20 +114,34 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
       if (nf) return void (await i.editReply(nf));
       throw err;
     }
-    const l = { userId: i.user.id, uid: p.uid, name: p.name, platform: p.platform, linkedAt: Date.now() };
+    const l = { userId: who.id, uid: p.uid, name: p.name, platform: p.platform, linkedAt: Date.now() };
+    const before = astore.link(who.id);
     astore.setLink(l);
-    tracker.forgetMember(i.user.id);
+    tracker.forgetMember(who.id);
     await tracker.record({ ...l }, p);
+    if (!who.self) log.info(`apex: ${i.user.id} linked ${who.id} to ${p.name} (${p.platform})`);
     await i.editReply({
-      content: `✅ Linked you to **${p.name}** on ${platformName(p.platform)}. You're on the squad leaderboard now, and \`/apex me\` shows your stats.`,
-      embeds: [await statsEmbed(p, memberName(i))],
+      content: who.self
+        ? `✅ Linked you to **${p.name}** on ${platformName(p.platform)}. You're on the squad leaderboard now, and \`/apex me\` shows your stats.`
+        : `✅ Linked <@${who.id}> to **${p.name}** on ${platformName(p.platform)}${before && before.uid !== p.uid ? ` (was **${before.name}**)` : ""}. They're on the squad leaderboard now, and can undo it with \`/apex unlink\`.`,
+      embeds: [await statsEmbed(p, who.name)],
+      allowedMentions: { parse: [] },
     });
     if (i.guildId) await tracker.updateBoards(i.guildId);
   }
 
   async function unlink(i: ChatInputCommandInteraction) {
-    const had = astore.unlink(i.user.id);
-    await i.reply({ content: had ? "👋 Unlinked. You're off the leaderboard." : "You haven't linked an Apex account.", flags: MessageFlags.Ephemeral });
+    const who = await target(i);
+    if (typeof who === "string") return void (await i.reply({ content: who, flags: MessageFlags.Ephemeral }));
+    const had = astore.unlink(who.id);
+    const text = who.self
+      ? had
+        ? "👋 Unlinked. You're off the leaderboard."
+        : "You haven't linked an Apex account."
+      : had
+        ? `👋 Unlinked <@${who.id}>. They're off the leaderboard.`
+        : `<@${who.id}> hasn't linked an Apex account.`;
+    await i.reply({ content: text, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
     if (had) await tracker.updateBoards();
   }
 
@@ -225,9 +251,15 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
         .setName("link")
         .setDescription("Link your Apex account (puts you on the squad leaderboard)")
         .addStringOption((o) => o.setName("player").setDescription("Your in-game name (on PC, your EA account name)").setRequired(true).setMaxLength(64))
-        .addStringOption((o) => o.setName("platform").setDescription("Where you play").setRequired(true).addChoices(...PLATFORMS)),
+        .addStringOption((o) => o.setName("platform").setDescription("Where you play").setRequired(true).addChoices(...PLATFORMS))
+        .addUserOption((o) => o.setName("member").setDescription("Server admins: link this member instead of yourself")),
     )
-    .addSubcommand((s) => s.setName("unlink").setDescription("Unlink your Apex account and leave the leaderboard"))
+    .addSubcommand((s) =>
+      s
+        .setName("unlink")
+        .setDescription("Unlink your Apex account and leave the leaderboard")
+        .addUserOption((o) => o.setName("member").setDescription("Server admins: unlink this member instead of yourself")),
+    )
     .addSubcommand((s) => s.setName("me").setDescription("Your rank, RP, level and banner stats"))
     .addSubcommand((s) =>
       s
