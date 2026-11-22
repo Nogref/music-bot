@@ -38,6 +38,7 @@ export interface ApexDeps {
 }
 
 const MASTER = rankValue({ name: "Master", div: 0 });
+const UID_RE = /^\d{4,25}$/;
 /** Starting list for legend suggestions; anything the API returns is added as it's seen. */
 const LEGENDS = [
   "Alter", "Ash", "Ballistic", "Bangalore", "Bloodhound", "Catalyst", "Caustic", "Conduit", "Crypto", "Fuse", "Gibraltar", "Horizon", "Lifeline", "Loba",
@@ -158,20 +159,40 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
     return { id: member.id, self: false, name: shown };
   }
 
+  /** Name or UID (exactly one), checked for shape. Returns a refusal string when it isn't usable. */
+  function nameOrUid(i: ChatInputCommandInteraction): { name?: string; uid?: string } | string {
+    const name = i.options.getString("player")?.trim() || undefined;
+    const uid = i.options.getString("uid")?.trim() || undefined;
+    if (name && uid) return "Use either `player:` or `uid:`, not both.";
+    if (uid && !UID_RE.test(uid)) return "A UID is just digits, like `1000575543540`. It's the number at the end of your apexlegendsstatus.com profile link.";
+    return { name, uid };
+  }
+
+  /** Looks a player up by name or UID, or explains that they weren't found. */
+  async function lookup(q: { name?: string; uid?: string }, platform: string): Promise<ApexPlayer | string> {
+    try {
+      return q.uid ? await apex.playerByUid(q.uid, platform) : await apex.player(q.name!, platform);
+    } catch (err) {
+      if (q.uid && err instanceof ApiError && err.status === 404) {
+        return `🔍 There's no ${platformName(platform)} player with UID \`${q.uid}\`. Check the number and the platform (it's the last part of the apexlegendsstatus.com profile link).`;
+      }
+      const nf = notFound(err, q.name ?? "", platform);
+      if (nf) return nf;
+      throw err;
+    }
+  }
+
   async function link(i: ChatInputCommandInteraction) {
-    const name = i.options.getString("player", true).trim();
     const platform = i.options.getString("platform", true);
+    const q = nameOrUid(i);
+    if (typeof q === "string") return void (await i.reply({ content: q, flags: MessageFlags.Ephemeral }));
+    if (!q.name && !q.uid) return void (await i.reply({ content: "Give your in-game name with `player:`, or your UID with `uid:`.", flags: MessageFlags.Ephemeral }));
     const who = await target(i);
     if (typeof who === "string") return void (await i.reply({ content: who, flags: MessageFlags.Ephemeral }));
     await i.deferReply({ flags: MessageFlags.Ephemeral });
-    let p: ApexPlayer;
-    try {
-      p = await apex.player(name, platform);
-    } catch (err) {
-      const nf = notFound(err, name, platform);
-      if (nf) return void (await i.editReply(nf));
-      throw err;
-    }
+    const found = await lookup(q, platform);
+    if (typeof found === "string") return void (await i.editReply(found));
+    const p = found;
     const l = { userId: who.id, uid: p.uid, name: p.name, platform: p.platform, linkedAt: Date.now() };
     const before = astore.link(who.id);
     astore.setLink(l);
@@ -205,18 +226,15 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
 
   async function stats(i: ChatInputCommandInteraction, self: boolean) {
     const member = self ? null : i.options.getUser("member");
-    const typed = self ? null : i.options.getString("player")?.trim();
+    const q = self ? {} : nameOrUid(i);
+    if (typeof q === "string") return void (await i.reply({ content: q, flags: MessageFlags.Ephemeral }));
     const platform = (self ? null : i.options.getString("platform")) ?? "PC";
     const legendWanted = i.options.getString("legend") ?? undefined;
     await i.deferReply();
-    if (typed) {
-      try {
-        return void (await i.editReply({ embeds: [await statsEmbed(await apex.player(typed, platform), undefined, legendWanted)] }));
-      } catch (err) {
-        const nf = notFound(err, typed, platform);
-        if (nf) return void (await i.editReply(nf));
-        throw err;
-      }
+    if (q.name || q.uid) {
+      const found = await lookup(q, platform);
+      if (typeof found === "string") return void (await i.editReply(found));
+      return void (await i.editReply({ embeds: [await statsEmbed(found, undefined, legendWanted)] }));
     }
     const userId = member?.id ?? i.user.id;
     const l = astore.link(userId);
@@ -315,9 +333,10 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
     .addSubcommand((s) =>
       s
         .setName("link")
-        .setDescription("Link your Apex account (puts you on the squad leaderboard)")
-        .addStringOption((o) => o.setName("player").setDescription("Your in-game name (on PC, your EA account name)").setRequired(true).setMaxLength(64))
+        .setDescription("Link your Apex account by name or UID (puts you on the squad leaderboard)")
         .addStringOption((o) => o.setName("platform").setDescription("Where you play").setRequired(true).addChoices(...PLATFORMS))
+        .addStringOption((o) => o.setName("player").setDescription("Your in-game name (on PC, your EA account name)").setMaxLength(64))
+        .addStringOption((o) => o.setName("uid").setDescription("Or your UID (the number at the end of your apexlegendsstatus.com profile link)").setMaxLength(25))
         .addUserOption((o) => o.setName("member").setDescription("Server admins: link this member instead of yourself")),
     )
     .addSubcommand((s) =>
@@ -338,7 +357,8 @@ export function apexFeature(d: ApexDeps): Feature & { tracker: ApexTracker; asto
         .setDescription("Someone's rank, RP, level and banner stats")
         .addUserOption((o) => o.setName("member").setDescription("A member who's linked their account"))
         .addStringOption((o) => o.setName("player").setDescription("Or any in-game name").setMaxLength(64))
-        .addStringOption((o) => o.setName("platform").setDescription("Platform for that name (default PC)").addChoices(...PLATFORMS))
+        .addStringOption((o) => o.setName("uid").setDescription("Or a UID (from an apexlegendsstatus.com profile link)").setMaxLength(25))
+        .addStringOption((o) => o.setName("platform").setDescription("Platform for that name or UID (default PC)").addChoices(...PLATFORMS))
         .addStringOption((o) => o.setName("legend").setDescription("Show this legend's banner stats instead").setAutocomplete(true).setMaxLength(40)),
     )
     .addSubcommand((s) => s.setName("map").setDescription("The Pubs and Ranked maps right now, and what's next"))

@@ -153,6 +153,27 @@ test("/apex link checks the name, then /apex me and /apex stats show rank, RP, l
   assert.match(text(gone), /Unlinked/);
 });
 
+test("link and look up by UID instead of name", async () => {
+  const env = setup();
+  mock.setPlayer({ name: "Ünïcødé Näme", uid: "1000575543540", platform: "PC", score: 7000, rank: "Platinum", div: 4 });
+  const ok = await env.run({ command: "apex", sub: "link", options: { platform: "PC", uid: "1000575543540" } });
+  assert.match(text(ok), /Linked you to \*\*Ünïcødé Näme\*\* on PC/);
+  assert.equal(env.astore.link("u1").uid, "1000575543540");
+  assert.equal(mock.calls.filter((c) => c.path === "/bridge").at(-1).query.uid, "1000575543540");
+
+  const both = await env.run({ command: "apex", sub: "link", options: { platform: "PC", uid: "1000575543540", player: "x" } });
+  assert.match(text(both), /either `player:` or `uid:`, not both/);
+  const neither = await env.run({ command: "apex", sub: "link", options: { platform: "PC" } });
+  assert.match(text(neither), /Give your in-game name with `player:`, or your UID with `uid:`/);
+  const junk = await env.run({ command: "apex", sub: "link", options: { platform: "PC", uid: "my uid" } });
+  assert.match(text(junk), /A UID is just digits/);
+  const missing = await env.run({ command: "apex", sub: "link", options: { platform: "PS4", uid: "1000575543540" } });
+  assert.match(text(missing), /There's no PlayStation player with UID `1000575543540`/);
+
+  const look = await env.run({ command: "apex", sub: "stats", options: { uid: "1000575543540" } });
+  assert.equal(embed(look).title, "Ünïcødé Näme · PC");
+});
+
 test("server admins can link and unlink someone else; members can only do themselves", async () => {
   const env = setup();
   mock.setPlayer({ name: "JoPlays", uid: "3003", platform: "PS4", score: 6000, rank: "Gold", div: 1 });
@@ -289,7 +310,8 @@ test("/apex and its /setup options only exist when APEX_API_KEY is set; everythi
   const cmds = env.app.router.guildCommandJson;
   const apex = cmds.find((c) => c.name === "apex");
   assert.deepEqual(apex.options.map((o) => o.name), ["link", "unlink", "me", "stats", "map", "predator", "servers", "leaderboard"]);
-  assert.deepEqual(apex.options.find((o) => o.name === "stats").options.map((o) => o.name), ["member", "player", "platform", "legend"]);
+  assert.deepEqual(apex.options.find((o) => o.name === "stats").options.map((o) => o.name), ["member", "player", "uid", "platform", "legend"]);
+  assert.deepEqual(apex.options.find((o) => o.name === "link").options.map((o) => [o.name, Boolean(o.required)]), [["platform", true], ["player", false], ["uid", false], ["member", false]]);
   assert.deepEqual(cmds.find((c) => c.name === "setup").options.map((o) => o.name), ["nowplaying", "apex-leaderboard", "apex-shoutouts"]);
   for (const sub of apex.options) {
     assert.ok(sub.description.length <= 100, sub.name);
