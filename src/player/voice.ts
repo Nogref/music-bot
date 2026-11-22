@@ -21,6 +21,7 @@ import {
 } from "@discordjs/voice";
 import type { VoiceBasedChannel } from "discord.js";
 import { Readable } from "node:stream";
+import prism from "prism-media";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { log } from "../core/logger.js";
 import type { SubsonicClient } from "../services/subsonic.js";
@@ -124,8 +125,18 @@ export class DiscordVoiceLink implements VoiceLink {
       throw new Error("the library didn't send Opus audio (check its Opus transcoding)");
     }
     const token = this.nextToken++;
-    const resource = createAudioResource<Meta>(stream, { inputType: type, metadata: { token }, inlineVolume: volume !== 100 });
-    resource.volume?.setVolumeLogarithmic(volume / 100);
+    let resource: AudioResource<Meta>;
+    if (volume === 100) {
+      // Straight through: only the container is unpacked, the audio isn't touched.
+      resource = createAudioResource<Meta>(stream, { inputType: type, metadata: { token } });
+    } else {
+      // Unpack the Opus packets here, so the volume path is Opus → decode → volume → encode
+      // (pure JS). Left to itself, @discordjs/voice would pick ffmpeg, which the image doesn't have.
+      const demuxer = type === StreamType.OggOpus ? new prism.opus.OggDemuxer() : new prism.opus.WebmDemuxer();
+      stream.on("error", (err) => demuxer.destroy(err));
+      resource = createAudioResource<Meta>(stream.pipe(demuxer), { inputType: StreamType.Opus, metadata: { token }, inlineVolume: true });
+      resource.volume?.setVolumeLogarithmic(volume / 100);
+    }
     this.resource = resource;
     this.player.play(resource);
     return token;

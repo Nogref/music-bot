@@ -20,10 +20,19 @@ test("streams Opus from the library; volume only decodes when it isn't 100%; see
   link.onEnd((token, err) => ends.push({ token, err }));
 
   const t1 = await link.play("s1", 0, 100);
-  assert.equal(link.setVolume(50), false, "100% is passed straight through, so changing it needs a restart");
+  assert.deepEqual(link.resource.edges.map((e) => e.type), ["ogg/opus demuxer"], "100% is passed straight through");
+  assert.equal(link.setVolume(50), false, "so changing it needs a restart");
   const t2 = await link.play("s1", 42, 70);
   assert.ok(t2 > t1);
+  // Never ffmpeg: the Docker image doesn't have it.
+  assert.deepEqual(link.resource.edges.map((e) => e.type), ["opus decoder", "volume transformer", "opus encoder"]);
   assert.equal(link.setVolume(50), true, "a decoded stream changes volume live");
+  // Audio actually comes out the other end.
+  const packet = await new Promise((resolve, reject) => {
+    link.resource.playStream.once("readable", () => resolve(link.resource.playStream.read()));
+    link.resource.playStream.once("error", reject);
+  });
+  assert.ok(Buffer.isBuffer(packet) && packet.length > 0);
   const stream = mock.calls.filter((c) => c.method === "stream").at(-1);
   assert.equal(stream.query.timeOffset, "42");
   assert.equal(stream.query.format, "opus");
