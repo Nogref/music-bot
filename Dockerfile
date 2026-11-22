@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build: compile TypeScript; native modules use prebuilt binaries ----------
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 # Toolchain only used if a native module (better-sqlite3) has no prebuilt binary.
 RUN apt-get update \
@@ -14,7 +14,7 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
 # ---- runtime ------------------------------------------------------------------
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 LABEL org.opencontainers.image.title="music-bot" \
       org.opencontainers.image.description="Discord music bot that plays your own library (Aurral or any Subsonic server) in voice channels" \
       org.opencontainers.image.licenses="MIT"
